@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FirstPen 管理画面</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+  <!-- サイドバー -->
+  <aside class="sidebar">
+    <div class="logo">
+      <span class="logo-icon">✦</span>
+      <div>
+        <div class="logo-title">FirstPen</div>
+        <div class="logo-sub">Admin Console</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <a href="#/dashboard"   class="nav-link" data-route="dashboard">📊 ダッシュボード</a>
+      <a href="#/subscribers" class="nav-link" data-route="subscribers">👥 登録者一覧</a>
+      <a href="#/tags"        class="nav-link" data-route="tags">🏷  タグ・セグメント</a>
+      <a href="#/templates"   class="nav-link" data-route="templates">📄 テンプレート</a>
+      <a href="#/campaigns"   class="nav-link" data-route="campaigns">📣 手動メール送信</a>
+      <a href="#/step-flows"  class="nav-link" data-route="step-flows">⏱  ステップメール</a>
+      <a href="#/settings"    class="nav-link" data-route="settings">⚙️  設定</a>
+    </nav>
+
+    <div class="side-foot">
+      <div id="api-status" class="api-status">API: <span>確認中...</span></div>
+      <div class="side-version">v2.0.0</div>
+    </div>
+  </aside>
+
+  <!-- メイン -->
+  <main class="main">
+    <header class="topbar">
+      <div id="breadcrumb" class="breadcrumb">ダッシュボード</div>
+      <div class="topbar-right">
+        <button id="reload-btn" class="btn-icon" title="リロード">🔄</button>
+      </div>
+    </header>
+
+    <div id="view" class="view"><div class="loading">読み込み中...</div></div>
+  </main>
+</div>
+
+<!-- モーダル -->
+<div id="modal" class="modal hidden">
+  <div class="modal-bg" onclick="App.closeModal()"></div>
+  <div class="modal-panel">
+    <div class="modal-head"><div id="modal-title"></div><button class="btn-icon" onclick="App.closeModal()">✕</button></div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- トースト -->
+<div id="toast" class="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

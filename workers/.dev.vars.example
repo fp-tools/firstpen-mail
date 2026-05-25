@@ -1,0 +1,22 @@
+# ローカル開発用 (cp .dev.vars.example .dev.vars して値を埋める)
+
+SENDGRID_API_KEY="SG.xxxxxxxxxxxxxxxxxxxxxx"
+FROM_EMAIL="no-reply@firstpen.jp"
+FROM_NAME="FirstPen 運営事務局"
+ADMIN_EMAIL="admin@firstpen.jp,soga.naoya@itghd.jp"
+
+# 管理画面 Basic認証
+ADMIN_USER="admin"
+ADMIN_PASS="please-change-this-strong-password"
+
+# CORS
+ALLOWED_ORIGIN="https://firstpen-platform.vercel.app,https://your-user.github.io,http://localhost:5500"
+
+# SendGrid Contacts自動同期 (true/false)
+SENDGRID_SYNC_CONTACTS="false"
+
+# 任意: Cloudflare Turnstile
+TURNSTILE_SECRET=""
+
+# ウィジェットが叩くAPIベース (本番Workers URL)
+API_BASE="https://firstpen-waitlist-api.YOUR-SUBDOMAIN.workers.dev"

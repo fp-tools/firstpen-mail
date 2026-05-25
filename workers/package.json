@@ -1,0 +1,25 @@
+{
+  "name": "firstpen-waitlist-api",
+  "version": "2.0.0",
+  "private": true,
+  "description": "FirstPen waitlist API + Admin (Cloudflare Workers + D1 + SendGrid)",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "db:create": "wrangler d1 create firstpen-waitlist",
+    "db:migrate:local": "wrangler d1 migrations apply firstpen-waitlist --local",
+    "db:migrate:prod": "wrangler d1 migrations apply firstpen-waitlist --remote",
+    "db:console": "wrangler d1 execute firstpen-waitlist --remote --command='SELECT COUNT(*) FROM subscribers;'",
+    "secret:sendgrid": "wrangler secret put SENDGRID_API_KEY",
+    "secret:from": "wrangler secret put FROM_EMAIL",
+    "secret:admin-email": "wrangler secret put ADMIN_EMAIL",
+    "secret:admin-pass": "wrangler secret put ADMIN_PASS",
+    "secret:turnstile": "wrangler secret put TURNSTILE_SECRET"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}

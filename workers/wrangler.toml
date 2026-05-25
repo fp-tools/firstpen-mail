@@ -1,0 +1,30 @@
+name = "firstpen-waitlist-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+workers_dev = true
+
+# --------------------------------------------
+#  D1 データベース (要: `wrangler d1 create firstpen-waitlist` 後にIDを記入)
+# --------------------------------------------
+[[d1_databases]]
+binding = "DB"
+database_name = "firstpen-waitlist"
+database_id = "db8554eb-6085-4973-a301-37b9cee64054"
+migrations_dir = "migrations"
+
+# --------------------------------------------
+#  非機密の環境変数 (機密は wrangler secret put で)
+# --------------------------------------------
+[vars]
+FROM_NAME = "FirstPen 運営事務局"
+ALLOWED_ORIGIN = "https://firstpen-platform.vercel.app,https://fp-toolsnaoya.github.io,https://fp-toolsnaoya.github.io/firstpen-mail"
+SENDGRID_SYNC_CONTACTS = "false"
+ADMIN_USER = "admin"
+API_BASE = "https://firstpen-waitlist-api.soga-naoya.workers.dev"
+
+# --------------------------------------------
+#  ログ
+# --------------------------------------------
+[observability]
+enabled = true

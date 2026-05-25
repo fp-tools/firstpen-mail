@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>埋め込みサンプル — FirstPen Waitlist Widget</title>
+<style>
+  body { font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; background: #f8f8f8; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 16px; margin-top: 30px; border-bottom: 2px solid #ddd; padding-bottom: 6px; }
+  pre { background: #1a1a1a; color: #f5f5f5; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 12px; }
+  code { font-family: 'SF Mono', Menlo, monospace; }
+  .demo-block { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 24px; margin: 16px 0; }
+</style>
+</head>
+<body>
+
+<h1>📦 FirstPen Waitlist Widget — 埋め込みサンプル</h1>
+<p>既存のページ (例: <code>firstpen-platform.vercel.app/waitlist.html</code>) に以下のコードを貼るだけで動作します。</p>
+
+<h2>① 最小構成 (ダークテーマ)</h2>
+<pre><code>&lt;div data-firstpen-form&gt;&lt;/div&gt;
+&lt;script src="https://firstpen-waitlist-api.YOUR-SUBDOMAIN.workers.dev/widget.js" defer&gt;&lt;/script&gt;</code></pre>
+<div class="demo-block">
+  <div data-firstpen-form></div>
+</div>
+
+<h2>② ライトテーマ + カスタムタイトル</h2>
+<pre><code>&lt;div data-firstpen-form
+     data-theme="light"
+     data-title="ローンチ通知を受け取る"
+     data-subtitle="先着300名限定の特典付き"&gt;&lt;/div&gt;</code></pre>
+<div class="demo-block">
+  <div data-firstpen-form data-theme="light" data-title="ローンチ通知を受け取る" data-subtitle="先着300名限定の特典付き"></div>
+</div>
+
+<h2>③ 同一ページに複数配置も可能</h2>
+<pre><code>&lt;!-- ヒーロー直下 --&gt;
+&lt;div data-firstpen-form&gt;&lt;/div&gt;
+
+&lt;!-- ページ下部に再表示 --&gt;
+&lt;div data-firstpen-form&gt;&lt;/div&gt;</code></pre>
+
+<h2>属性一覧</h2>
+<table border="1" cellpadding="8" style="border-collapse: collapse; width: 100%;">
+  <tr><th align="left">属性</th><th align="left">値</th><th align="left">説明</th></tr>
+  <tr><td><code>data-firstpen-form</code></td><td>(必須)</td><td>このdivにフォームが描画されます</td></tr>
+  <tr><td><code>data-theme</code></td><td>dark / light</td><td>カラーテーマ (デフォルト: dark)</td></tr>
+  <tr><td><code>data-title</code></td><td>任意文字列</td><td>フォーム上部のタイトル</td></tr>
+  <tr><td><code>data-subtitle</code></td><td>任意文字列</td><td>サブタイトル</td></tr>
+</table>
+
+<h2>動的にフォームを追加するには</h2>
+<pre><code>// JavaScript で動的にDOMを追加した後
+const div = document.createElement('div');
+div.setAttribute('data-firstpen-form', '');
+document.body.appendChild(div);
+window.FirstPen.mount(div);  // 単一要素にマウント
+// または
+window.FirstPen.init();      // ページ内の全 [data-firstpen-form] を再スキャン</code></pre>
+
+<!-- ▼ 実際のウィジェットスクリプト読込 ▼ -->
+<!--
+  ※ デプロイ後、以下のURLを差し替えてください:
+  <script src="https://firstpen-waitlist-api.YOUR-SUBDOMAIN.workers.dev/widget.js" defer></script>
+-->
+
+</body>
+</html>
