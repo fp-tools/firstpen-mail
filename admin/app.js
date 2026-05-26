@@ -141,9 +141,10 @@ const App = {
     'subscribers': { title: '登録者一覧',         fn: 'renderSubscribers' },
     'tags':        { title: 'タグ・セグメント',   fn: 'renderTags' },
     'templates':   { title: 'テンプレート',       fn: 'renderTemplates' },
-    'campaigns':   { title: '手動メール送信',     fn: 'renderCampaigns' },
-    'step-flows':  { title: 'ステップメール',     fn: 'renderStepFlows' },
-    'settings':    { title: '設定',               fn: 'renderSettings' },
+    'campaigns':        { title: '手動メール送信',   fn: 'renderCampaigns' },
+    'step-flows':       { title: 'ステップメール',   fn: 'renderStepFlows' },
+    'sender-settings':  { title: '送信者設定',       fn: 'renderSenderSettings' },
+    'settings':         { title: '設定',             fn: 'renderSettings' },
   },
 
   async handleRoute(force = false) {
@@ -268,10 +269,10 @@ const App = {
         datasets: [{
           data: roleData.map(r => r.n),
           backgroundColor: ['#7c3aed','#10b981','#fbbf24','#6b7280'],
-          borderColor: '#1a1a1a', borderWidth: 2,
+          borderColor: '#ffffff', borderWidth: 2,
         }],
       },
-      options: { plugins: { legend: { labels: { color: '#bbb', font: { size: 12 } } } }, cutout: '65%' },
+      options: { plugins: { legend: { labels: { color: '#374151', font: { size: 12 } } } }, cutout: '65%' },
     });
   },
 
@@ -658,7 +659,10 @@ const App = {
   // ============================================================
   async renderCampaigns() {
     await this.loadTagsCache();
-    const { items: campaigns } = await this.api('/api/admin/campaigns');
+    const [{ items: campaigns }, { items: senders }] = await Promise.all([
+      this.api('/api/admin/campaigns'),
+      this.api('/api/admin/sender-settings'),
+    ]);
 
     const useTplId = sessionStorage.getItem('fp_use_template');
     sessionStorage.removeItem('fp_use_template');
@@ -671,6 +675,12 @@ const App = {
         <div class="form-row">
           <div><label>キャンペーン名 (内部管理用)</label><input class="input" id="c-name" placeholder="例: 2026年6月号"></div>
           <div><label>件名 *</label><input class="input" id="c-subject" placeholder="メール件名"></div>
+          <div><label>送信元 (From)</label>
+            <select class="select" id="c-sender">
+              <option value="">デフォルト送信者</option>
+              ${senders.map(s => `<option value="${s.id}" ${s.is_default ? 'selected' : ''}>${this.escape(s.from_name)} &lt;${this.escape(s.from_email)}&gt;</option>`).join('')}
+            </select>
+          </div>
         </div>
 
         <label>テンプレートから読込</label>
@@ -785,12 +795,14 @@ const App = {
   },
 
   async sendCampaign() {
+    const senderId = parseInt(document.getElementById('c-sender')?.value, 10) || null;
     const body = {
       name: document.getElementById('c-name').value.trim() || `Campaign ${new Date().toISOString().slice(0,16)}`,
       subject: document.getElementById('c-subject').value.trim(),
       body_html: document.getElementById('c-html').value,
       body_text: document.getElementById('c-text').value,
       target: this.buildTarget(),
+      ...(senderId ? { from_sender_id: senderId } : {}),
     };
     if (!body.subject || !body.body_html) return this.showToast('件名とHTML本文は必須', 'ng');
     if (!confirm(`本当に送信しますか?\n件名: ${body.subject}`)) return;
@@ -960,6 +972,100 @@ const App = {
   },
 
   // ============================================================
+  //  画面: 送信者設定
+  // ============================================================
+  async renderSenderSettings() {
+    const { items } = await this.api('/api/admin/sender-settings');
+    this.view.innerHTML = `
+      <div class="row" style="justify-content:space-between;margin-bottom:14px">
+        <h2 class="section-title" style="margin:0">送信者設定</h2>
+        <div class="row">
+          <button class="btn" onclick="App.syncSenders()">🔄 SendGridから同期</button>
+          <button class="btn btn-primary" onclick="App.openNewSender()">+ 追加</button>
+        </div>
+      </div>
+      <p class="section-sub">SendGridで事前に承認されたFromアドレスを管理します。送信時にここで設定したアドレスを選択できます。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>メールアドレス</th><th>表示名</th><th>ステータス</th><th>デフォルト</th><th>SG Sender ID</th><th></th></tr></thead>
+          <tbody>
+            ${items.length ? items.map(s => `
+              <tr>
+                <td class="dim">#${s.id}</td>
+                <td>${this.escape(s.from_email)}</td>
+                <td>${this.escape(s.from_name) || '<span class="dim">-</span>'}</td>
+                <td><span class="badge badge-${s.status === 'verified' ? 'active' : 'unsub'}">${this.escape(s.status)}</span></td>
+                <td>${s.is_default ? '<span class="badge badge-sent">デフォルト</span>' : `<button class="btn btn-sm" onclick="App.setDefaultSender(${s.id})">設定</button>`}</td>
+                <td class="dim">${s.sendgrid_sender_id || '-'}</td>
+                <td class="actions">
+                  <button class="btn btn-sm" onclick="App.editSender(${s.id},'${this.escape(s.from_email)}','${this.escape(s.from_name)}',${s.sendgrid_sender_id||'null'})">編集</button>
+                  ${s.is_default ? '' : `<button class="btn btn-sm btn-danger" onclick="App.deleteSender(${s.id})">削除</button>`}
+                </td>
+              </tr>
+            `).join('') : '<tr><td colspan="7"><div class="empty">送信者が登録されていません</div></td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+  },
+
+  openNewSender() {
+    this.openModal('送信者を追加', this.senderFormHtml());
+  },
+  editSender(id, email, name, sgId) {
+    this.openModal('送信者を編集', this.senderFormHtml({ id, email, name, sgId }));
+  },
+  senderFormHtml(s = {}) {
+    return `
+      <div class="form-row">
+        <div><label>メールアドレス *</label><input class="input" id="s-email" type="email" value="${this.escape(s.email || '')}" ${s.id ? 'readonly' : ''}></div>
+        <div><label>表示名 *</label><input class="input" id="s-name" value="${this.escape(s.name || '')}"></div>
+        <div><label>SendGrid Sender ID (任意)</label><input class="input" id="s-sgid" type="number" value="${s.sgId || ''}"></div>
+      </div>
+      <div class="row" style="justify-content:space-between">
+        ${s.id ? `<button class="btn btn-danger btn-sm" onclick="App.deleteSender(${s.id})">削除</button>` : '<span></span>'}
+        <div class="row">
+          <button class="btn" onclick="App.closeModal()">キャンセル</button>
+          <button class="btn btn-primary" onclick="App.saveSender(${s.id || 0})">保存</button>
+        </div>
+      </div>`;
+  },
+  async saveSender(id) {
+    const body = {
+      from_email: document.getElementById('s-email').value.trim(),
+      from_name: document.getElementById('s-name').value.trim(),
+      sendgrid_sender_id: parseInt(document.getElementById('s-sgid').value, 10) || null,
+    };
+    if (!body.from_email || !body.from_name) return this.showToast('メールアドレスと表示名は必須', 'ng');
+    try {
+      if (id) await this.api(`/api/admin/sender-settings/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+      else    await this.api('/api/admin/sender-settings',         { method: 'POST', body: JSON.stringify(body) });
+      this.showToast('保存しました'); this.closeModal(); this.renderSenderSettings();
+    } catch (e) { this.showToast(e.message, 'ng'); }
+  },
+  async deleteSender(id) {
+    if (!confirm('この送信者を削除しますか？')) return;
+    try {
+      await this.api(`/api/admin/sender-settings/${id}`, { method: 'DELETE' });
+      this.showToast('削除しました'); this.closeModal(); this.renderSenderSettings();
+    } catch (e) { this.showToast(e.message, 'ng'); }
+  },
+  async setDefaultSender(id) {
+    try {
+      await this.api(`/api/admin/sender-settings/${id}/default`, { method: 'POST' });
+      this.showToast('デフォルト送信者を変更しました'); this.renderSenderSettings();
+    } catch (e) { this.showToast(e.message, 'ng'); }
+  },
+  async syncSenders() {
+    this.showToast('SendGridと同期中...');
+    try {
+      const r = await this.api('/api/admin/sender-settings/sync', { method: 'POST' });
+      this.showToast(`同期完了 (${r.synced} 件)`); this.renderSenderSettings();
+    } catch (e) { this.showToast('同期失敗: ' + e.message, 'ng'); }
+  },
+
+  // ============================================================
   //  画面: 設定
   // ============================================================
   renderSettings() {
@@ -1031,8 +1137,8 @@ function chartOpts() {
     maintainAspectRatio: false,
     plugins: { legend: { display: false } },
     scales: {
-      x: { ticks: { color: '#888', font: { size: 11 } }, grid: { color: '#222' } },
-      y: { ticks: { color: '#888', font: { size: 11 } }, grid: { color: '#222' }, beginAtZero: true },
+      x: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: 'rgba(0,0,0,.07)' } },
+      y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: 'rgba(0,0,0,.07)' }, beginAtZero: true },
     },
   };
 }

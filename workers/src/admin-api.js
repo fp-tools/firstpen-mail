@@ -66,6 +66,14 @@ export async function handleAdminRequest(request, env, corsHeaders) {
   if (path === '/api/admin/stats/overview' && method === 'GET') return statsOverview(env, corsHeaders);
   if (path === '/api/admin/stats/events'   && method === 'GET') return statsEvents(env, q, corsHeaders);
 
+  // ---- Sender Settings ----
+  if (path === '/api/admin/sender-settings' && method === 'GET')  return listSenderSettings(env, corsHeaders);
+  if (path === '/api/admin/sender-settings' && method === 'POST') return createSenderSetting(request, env, corsHeaders);
+  if (path === '/api/admin/sender-settings/sync' && method === 'POST') return syncSendersFromSendGrid(env, corsHeaders);
+  if ((m = match(path, '/api/admin/sender-settings/:id')) && method === 'PUT')    return updateSenderSetting(request, env, m.id, corsHeaders);
+  if ((m = match(path, '/api/admin/sender-settings/:id')) && method === 'DELETE') return deleteSenderSetting(env, m.id, corsHeaders);
+  if ((m = match(path, '/api/admin/sender-settings/:id/default')) && method === 'POST') return setDefaultSender(env, m.id, corsHeaders);
+
   return json({ ok: false, error: 'Not Found' }, 404, corsHeaders);
 }
 
@@ -311,8 +319,19 @@ async function getCampaign(env, id, ch) {
 
 async function createAndSendCampaign(request, env, ch) {
   const body = await request.json().catch(() => ({}));
-  const { name, subject, body_html, body_text = '', target = {} } = body;
+  const { name, subject, body_html, body_text = '', target = {}, from_sender_id } = body;
   if (!name || !subject || !body_html) return json({ ok: false, error: 'name/subject/body_html required' }, 400, ch);
+
+  // 送信者を解決 (from_sender_id指定 → デフォルト → env変数)
+  let fromEmail, fromName;
+  if (from_sender_id) {
+    const sender = await env.DB.prepare('SELECT from_email, from_name FROM sender_settings WHERE id = ?').bind(from_sender_id).first();
+    if (sender) { fromEmail = sender.from_email; fromName = sender.from_name; }
+  }
+  if (!fromEmail) {
+    const def = await env.DB.prepare('SELECT from_email, from_name FROM sender_settings WHERE is_default = 1').first();
+    if (def) { fromEmail = def.from_email; fromName = def.from_name; }
+  }
 
   // 配信対象を解決
   const recipients = await resolveRecipients(env, target);
@@ -334,6 +353,8 @@ async function createAndSendCampaign(request, env, ch) {
       subject, html: body_html, text: body_text,
       categories: ['campaign', `campaign-${campaignId}`],
       customArgs: { campaign_id: String(campaignId) },
+      fromEmail,
+      fromName,
     });
     await env.DB.prepare(`
       UPDATE campaigns SET status = ?, sent_count = ?, failed_count = ?, sent_at = ? WHERE id = ?
@@ -438,6 +459,83 @@ async function toggleStepFlow(env, id, ch) {
   const next = row.status === 'active' ? 'paused' : 'active';
   await env.DB.prepare(`UPDATE step_flows SET status = ?, updated_at = ? WHERE id = ?`).bind(next, new Date().toISOString(), id).run();
   return json({ ok: true, status: next }, 200, ch);
+}
+
+// ====================================================================
+//  Sender Settings
+// ====================================================================
+async function listSenderSettings(env, ch) {
+  const res = await env.DB.prepare('SELECT * FROM sender_settings ORDER BY is_default DESC, id').all();
+  return json({ ok: true, items: res.results || [] }, 200, ch);
+}
+
+async function createSenderSetting(request, env, ch) {
+  const { from_email, from_name = '', is_default = 0 } = await request.json().catch(() => ({}));
+  if (!from_email) return json({ ok: false, error: 'from_email required' }, 400, ch);
+  if (is_default) await env.DB.prepare('UPDATE sender_settings SET is_default = 0').run();
+  try {
+    const r = await env.DB.prepare(
+      'INSERT INTO sender_settings (from_email, from_name, is_default) VALUES (?, ?, ?)'
+    ).bind(from_email, from_name, is_default ? 1 : 0).run();
+    return json({ ok: true, id: r.meta?.last_row_id }, 200, ch);
+  } catch (e) { return json({ ok: false, error: e.message }, 400, ch); }
+}
+
+async function syncSendersFromSendGrid(env, ch) {
+  if (!env.SENDGRID_API_KEY) return json({ ok: false, error: 'SENDGRID_API_KEY not configured' }, 400, ch);
+  const res = await fetch('https://api.sendgrid.com/v3/verified_senders', {
+    headers: { Authorization: `Bearer ${env.SENDGRID_API_KEY}` },
+  });
+  if (!res.ok) return json({ ok: false, error: `SendGrid error: ${res.status}` }, 500, ch);
+  const data = await res.json();
+  const senders = data.results || [];
+  let upserted = 0;
+  for (const s of senders) {
+    if (!s.verified?.status) continue;
+    await env.DB.prepare(`
+      INSERT INTO sender_settings (from_email, from_name, sendgrid_sender_id, status)
+      VALUES (?, ?, ?, 'verified')
+      ON CONFLICT(from_email) DO UPDATE SET
+        from_name = CASE WHEN sender_settings.from_name = '' THEN excluded.from_name ELSE sender_settings.from_name END,
+        sendgrid_sender_id = excluded.sendgrid_sender_id,
+        status = 'verified',
+        updated_at = datetime('now')
+    `).bind(s.from_email, s.from_name || '', s.id || null).run();
+    upserted++;
+  }
+  const items = (await env.DB.prepare('SELECT * FROM sender_settings ORDER BY is_default DESC, id').all()).results || [];
+  return json({ ok: true, synced: upserted, total: senders.length, items }, 200, ch);
+}
+
+async function updateSenderSetting(request, env, id, ch) {
+  const body = await request.json().catch(() => ({}));
+  const sets = [], args = [];
+  for (const f of ['from_name', 'status']) if (f in body) { sets.push(`${f} = ?`); args.push(body[f]); }
+  if (body.is_default !== undefined) {
+    if (body.is_default) await env.DB.prepare('UPDATE sender_settings SET is_default = 0').run();
+    sets.push('is_default = ?'); args.push(body.is_default ? 1 : 0);
+  }
+  if (!sets.length) return json({ ok: false, error: 'No fields' }, 400, ch);
+  sets.push('updated_at = ?'); args.push(new Date().toISOString());
+  args.push(id);
+  await env.DB.prepare(`UPDATE sender_settings SET ${sets.join(', ')} WHERE id = ?`).bind(...args).run();
+  return json({ ok: true }, 200, ch);
+}
+
+async function deleteSenderSetting(env, id, ch) {
+  const row = await env.DB.prepare('SELECT is_default FROM sender_settings WHERE id = ?').bind(id).first();
+  if (!row) return json({ ok: false, error: 'Not Found' }, 404, ch);
+  if (row.is_default) return json({ ok: false, error: 'デフォルト送信者は削除できません' }, 400, ch);
+  await env.DB.prepare('DELETE FROM sender_settings WHERE id = ?').bind(id).run();
+  return json({ ok: true }, 200, ch);
+}
+
+async function setDefaultSender(env, id, ch) {
+  const row = await env.DB.prepare('SELECT id FROM sender_settings WHERE id = ?').bind(id).first();
+  if (!row) return json({ ok: false, error: 'Not Found' }, 404, ch);
+  await env.DB.prepare('UPDATE sender_settings SET is_default = 0').run();
+  await env.DB.prepare('UPDATE sender_settings SET is_default = 1, updated_at = ? WHERE id = ?').bind(new Date().toISOString(), id).run();
+  return json({ ok: true }, 200, ch);
 }
 
 // ====================================================================

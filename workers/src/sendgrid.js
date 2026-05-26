@@ -54,7 +54,7 @@ export async function sendMail(env, { to, subject, html, text, categories = [], 
 /**
  * 一斉送信 (個別のpersonalizationsを最大1000件まで一度に)
  */
-export async function sendBatchMail(env, { recipients, subject, html, text, categories = [], customArgs = {} }) {
+export async function sendBatchMail(env, { recipients, subject, html, text, categories = [], customArgs = {}, fromEmail, fromName }) {
   // SendGridは1リクエストあたり最大1000件のpersonalizations
   const CHUNK = 1000;
   const results = { sent: 0, failed: 0, errors: [] };
@@ -77,7 +77,7 @@ export async function sendBatchMail(env, { recipients, subject, html, text, cate
         method: 'POST',
         body: JSON.stringify({
           personalizations,
-          from: { email: env.FROM_EMAIL, name: env.FROM_NAME || 'FirstPen' },
+          from: { email: fromEmail || env.FROM_EMAIL, name: fromName || env.FROM_NAME || 'FirstPen' },
           content: [
             ...(text ? [{ type: 'text/plain', value: text }] : []),
             { type: 'text/html', value: html },
