@@ -18,7 +18,7 @@ migrations_dir = "migrations"
 # --------------------------------------------
 [vars]
 FROM_NAME = "FirstPen 運営事務局"
-ALLOWED_ORIGIN = "https://firstpen-platform.vercel.app,https://fp-toolsnaoya.github.io,https://fp-toolsnaoya.github.io/firstpen-mail"
+ALLOWED_ORIGIN = "https://firstpen-platform.vercel.app,https://fp-tools.github.io,https://fp-tools.github.io/firstpen-mail"
 SENDGRID_SYNC_CONTACTS = "false"
 ADMIN_USER = "admin"
 API_BASE = "https://firstpen-waitlist-api.soga-naoya.workers.dev"

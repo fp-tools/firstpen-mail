@@ -10,7 +10,25 @@
 </head>
 <body>
 
-<div id="app">
+<!-- ログイン画面 -->
+<div id="login-screen" class="hidden">
+  <div class="login-box">
+    <div class="login-logo">✦ FirstPen Admin</div>
+    <h1 class="login-title">管理画面ログイン</h1>
+    <div class="form-row">
+      <label>ユーザー名</label>
+      <input type="text" id="l-user" class="input" value="admin" autocomplete="username">
+    </div>
+    <div class="form-row">
+      <label>パスワード</label>
+      <input type="password" id="l-pass" class="input" placeholder="パスワードを入力" autocomplete="current-password">
+    </div>
+    <div id="l-err" class="login-err hidden"></div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:4px" onclick="App.doLogin()">ログイン</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
   <!-- サイドバー -->
   <aside class="sidebar">
     <div class="logo">
@@ -33,6 +51,7 @@
 
     <div class="side-foot">
       <div id="api-status" class="api-status">API: <span>確認中...</span></div>
+      <button class="btn btn-ghost btn-sm" onclick="App.logout()" style="margin-top:6px;width:100%">ログアウト</button>
       <div class="side-version">v2.0.0</div>
     </div>
   </aside>

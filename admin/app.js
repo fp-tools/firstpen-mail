@@ -21,9 +21,60 @@ const App = {
   cache: { tags: [], templates: [] },
 
   // ============================================================
+  //  認証管理
+  // ============================================================
+  AUTH_KEY: 'fp_admin_auth',
+  getAuth() { return localStorage.getItem(this.AUTH_KEY) || ''; },
+  setAuth(user, pass) { localStorage.setItem(this.AUTH_KEY, btoa(`${user}:${pass}`)); },
+  clearAuth() { localStorage.removeItem(this.AUTH_KEY); },
+
+  showLoginScreen() {
+    document.getElementById('login-screen').classList.remove('hidden');
+    document.getElementById('app').classList.add('hidden');
+  },
+
+  hideLoginScreen() {
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+  },
+
+  async doLogin() {
+    const user = document.getElementById('l-user').value.trim();
+    const pass = document.getElementById('l-pass').value;
+    const err = document.getElementById('l-err');
+    err.classList.add('hidden');
+    if (!user || !pass) { err.textContent = 'ユーザー名とパスワードを入力してください'; err.classList.remove('hidden'); return; }
+    this.setAuth(user, pass);
+    try {
+      await this.api('/api/admin/stats/overview');
+      this.hideLoginScreen();
+      this.bindNav();
+      this.bindGlobal();
+      await this.healthCheck();
+      this.handleRoute();
+      window.addEventListener('hashchange', () => this.handleRoute());
+    } catch (e) {
+      this.clearAuth();
+      err.textContent = 'ユーザー名またはパスワードが違います';
+      err.classList.remove('hidden');
+    }
+  },
+
+  logout() {
+    this.clearAuth();
+    this.showLoginScreen();
+  },
+
+  // ============================================================
   //  起動
   // ============================================================
   async start() {
+    if (!this.getAuth()) {
+      this.showLoginScreen();
+      document.getElementById('l-pass').addEventListener('keydown', e => { if (e.key === 'Enter') this.doLogin(); });
+      return;
+    }
+    this.hideLoginScreen();
     this.bindNav();
     this.bindGlobal();
     await this.healthCheck();
@@ -46,17 +97,19 @@ const App = {
   //  API helpers
   // ============================================================
   async api(path, opts = {}) {
+    const auth = this.getAuth();
     const res = await fetch(`${this.apiBase}${path}`, {
       ...opts,
-      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
+        ...(auth ? { 'Authorization': `Basic ${auth}` } : {}),
         ...(opts.headers || {}),
       },
     });
     if (res.status === 401) {
-      // Basic認証ダイアログをブラウザが出すまでループ
-      throw new Error('認証が必要です');
+      this.clearAuth();
+      this.showLoginScreen();
+      throw new Error('認証が必要です。再ログインしてください。');
     }
     if (!res.ok) {
       let msg = `${res.status}`;
