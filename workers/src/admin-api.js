@@ -16,7 +16,7 @@
  * - /api/admin/stats/events         GET イベント時系列
  */
 import { json, text, csvField, toCsv, match } from './utils.js';
-import { sendBatchMail } from './sendgrid.js';
+import { sendBatchMail, setupEventWebhook, getEventWebhookSettings, syncContactsBulk, requestVerifiedSender, listVerifiedSenders } from './sendgrid.js';
 
 export async function handleAdminRequest(request, env, corsHeaders) {
   const url = new URL(request.url);
@@ -70,6 +70,11 @@ export async function handleAdminRequest(request, env, corsHeaders) {
   if (path === '/api/admin/sender-settings' && method === 'GET')  return listSenderSettings(env, corsHeaders);
   if (path === '/api/admin/sender-settings' && method === 'POST') return createSenderSetting(request, env, corsHeaders);
   if (path === '/api/admin/sender-settings/sync' && method === 'POST') return syncSendersFromSendGrid(env, corsHeaders);
+
+  // ---- SendGrid Setup ----
+  if (path === '/api/admin/sendgrid/webhook-setup'   && method === 'POST') return setupSendGridWebhook(env, corsHeaders);
+  if (path === '/api/admin/sendgrid/contacts-sync'   && method === 'POST') return syncContactsToSendGrid(env, corsHeaders);
+  if (path === '/api/admin/sendgrid/sender-request'  && method === 'POST') return createVerifiedSenderRequest(request, env, corsHeaders);
   if ((m = match(path, '/api/admin/sender-settings/:id')) && method === 'PUT')    return updateSenderSetting(request, env, m.id, corsHeaders);
   if ((m = match(path, '/api/admin/sender-settings/:id')) && method === 'DELETE') return deleteSenderSetting(env, m.id, corsHeaders);
   if ((m = match(path, '/api/admin/sender-settings/:id/default')) && method === 'POST') return setDefaultSender(env, m.id, corsHeaders);
@@ -588,4 +593,50 @@ async function statsEvents(env, q, ch) {
     GROUP BY d, event_type ORDER BY d
   `).bind(`-${days} days`).all();
   return json({ ok: true, days, series: res.results || [] }, 200, ch);
+}
+
+// ====================================================================
+//  SendGrid セットアップ
+// ====================================================================
+
+async function setupSendGridWebhook(env, ch) {
+  const webhookUrl = `${env.API_BASE}/api/sendgrid/webhook`;
+  try {
+    await setupEventWebhook(env, webhookUrl);
+    const current = await getEventWebhookSettings(env);
+    return json({ ok: true, url: webhookUrl, enabled: current?.enabled ?? true }, 200, ch);
+  } catch (e) {
+    return json({ ok: false, error: e.message }, 500, ch);
+  }
+}
+
+async function syncContactsToSendGrid(env, ch) {
+  const { results } = await env.DB.prepare(
+    `SELECT id, email, name FROM subscribers WHERE status = 'active' LIMIT 10000`
+  ).all();
+  if (!results?.length) return json({ ok: true, synced: 0 }, 200, ch);
+  try {
+    const r = await syncContactsBulk(env, results);
+    return json({ ok: true, ...r }, 200, ch);
+  } catch (e) {
+    return json({ ok: false, error: e.message }, 500, ch);
+  }
+}
+
+async function createVerifiedSenderRequest(request, env, ch) {
+  const body = await request.json();
+  if (!body.from_email || !body.from_name) {
+    return json({ ok: false, error: 'from_email と from_name は必須' }, 400, ch);
+  }
+  try {
+    const r = await requestVerifiedSender(env, body);
+    // DBにも仮登録 (status: pending)
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO sender_settings (from_email, from_name, status, created_at, updated_at)
+       VALUES (?, ?, 'pending', ?, ?)`
+    ).bind(body.from_email, body.from_name, new Date().toISOString(), new Date().toISOString()).run();
+    return json({ ok: true, result: r, note: '確認メールをご確認ください。リンクをクリックすると認証完了です。' }, 200, ch);
+  } catch (e) {
+    return json({ ok: false, error: e.message }, 500, ch);
+  }
 }

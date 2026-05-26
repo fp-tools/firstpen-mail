@@ -149,6 +149,86 @@ export async function createSingleSend(env, { name, subject, htmlContent, plainC
 }
 
 // ============================================================
+//  Event Webhook 設定
+// ============================================================
+
+export async function setupEventWebhook(env, webhookUrl) {
+  return sgFetch(env, '/user/webhooks/event/settings', {
+    method: 'PATCH',
+    body: JSON.stringify({
+      enabled: true,
+      url: webhookUrl,
+      delivered: true,
+      open: true,
+      click: true,
+      bounce: true,
+      dropped: true,
+      unsubscribe: true,
+      group_unsubscribe: true,
+      group_resubscribe: true,
+      spam_report: true,
+      deferred: false,
+      processed: false,
+    }),
+  });
+}
+
+export async function getEventWebhookSettings(env) {
+  return sgFetch(env, '/user/webhooks/event/settings');
+}
+
+// ============================================================
+//  Marketing Contacts 一括同期
+// ============================================================
+
+export async function syncContactsBulk(env, subscribers) {
+  const CHUNK = 2000; // SendGrid推奨上限
+  const results = { synced: 0, job_ids: [], errors: [] };
+  for (let i = 0; i < subscribers.length; i += CHUNK) {
+    const chunk = subscribers.slice(i, i + CHUNK);
+    const contacts = chunk.map(s => ({
+      email: s.email,
+      ...(s.name ? { first_name: s.name } : {}),
+    }));
+    try {
+      const r = await sgFetch(env, '/marketing/contacts', {
+        method: 'PUT',
+        body: JSON.stringify({ contacts }),
+      });
+      results.synced += chunk.length;
+      if (r?.job_id) results.job_ids.push(r.job_id);
+    } catch (e) {
+      results.errors.push(e.message);
+    }
+  }
+  return results;
+}
+
+// ============================================================
+//  Verified Sender 申請
+// ============================================================
+
+export async function requestVerifiedSender(env, { fromEmail, fromName, address = '', city = 'Tokyo', country = 'JP' }) {
+  return sgFetch(env, '/verified_senders', {
+    method: 'POST',
+    body: JSON.stringify({
+      nickname: fromName,
+      from_email: fromEmail,
+      from_name: fromName,
+      reply_to: fromEmail,
+      reply_to_name: fromName,
+      address: address || 'Japan',
+      city,
+      country,
+    }),
+  });
+}
+
+export async function listVerifiedSenders(env) {
+  return sgFetch(env, '/verified_senders');
+}
+
+// ============================================================
 //  Stats API
 // ============================================================
 

@@ -1107,6 +1107,38 @@ const App = {
       </div>
 
       <div class="card">
+        <div class="card-title">SendGrid セットアップ</div>
+        <p class="muted" style="font-size:12px;margin-bottom:14px">SendGrid側の各設定をここから一括で実行できます。</p>
+
+        <div class="row" style="gap:14px;flex-wrap:wrap">
+          <div class="card" style="flex:1;min-width:220px;padding:16px">
+            <div class="card-title" style="font-size:13px">Event Webhook 自動設定</div>
+            <p class="muted" style="font-size:11px;margin:6px 0 12px">開封・クリック・バウンスの自動記録URLをSendGridに登録します。</p>
+            <button class="btn btn-primary btn-sm" onclick="App.setupWebhook()">⚡ Webhook を設定</button>
+            <div id="webhook-result" style="margin-top:8px;font-size:11px"></div>
+          </div>
+
+          <div class="card" style="flex:1;min-width:220px;padding:16px">
+            <div class="card-title" style="font-size:13px">Marketing Contacts 一括同期</div>
+            <p class="muted" style="font-size:11px;margin:6px 0 12px">配信中の登録者全員をSendGrid Contactsに同期します（最大10,000件）。</p>
+            <button class="btn btn-primary btn-sm" onclick="App.syncContacts()">🔄 Contacts を同期</button>
+            <div id="contacts-result" style="margin-top:8px;font-size:11px"></div>
+          </div>
+
+          <div class="card" style="flex:1;min-width:220px;padding:16px">
+            <div class="card-title" style="font-size:13px">Verified Sender 新規申請</div>
+            <p class="muted" style="font-size:11px;margin:6px 0 6px">新しいFromアドレスを申請します。SendGridから確認メールが届くのでクリックで認証完了。</p>
+            <div class="form-row" style="grid-template-columns:1fr;gap:6px;margin-bottom:8px">
+              <input class="input" id="vs-email" type="email" placeholder="from@example.com" style="font-size:12px">
+              <input class="input" id="vs-name"  type="text"  placeholder="表示名 (例: FirstPen事務局)" style="font-size:12px">
+            </div>
+            <button class="btn btn-sm" onclick="App.requestVerifiedSender()">📧 申請する</button>
+            <div id="sender-req-result" style="margin-top:8px;font-size:11px"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-title">SendGrid Marketing → Automations 連携</div>
         <p class="muted" style="font-size:12px;line-height:1.8">
           現在の構成では、ステップメールの<strong>定義はこの管理画面で行い</strong>、<br>
@@ -1120,6 +1152,45 @@ const App = {
       </div>
     `;
   },
+  async setupWebhook() {
+    const el = document.getElementById('webhook-result');
+    el.textContent = '設定中...';
+    try {
+      const r = await this.api('/api/admin/sendgrid/webhook-setup', { method: 'POST' });
+      el.style.color = '#10b981';
+      el.textContent = `✅ 設定完了: ${r.url}`;
+      this.showToast('Webhook を設定しました');
+    } catch (e) { el.style.color = '#f87171'; el.textContent = '❌ ' + e.message; }
+  },
+
+  async syncContacts() {
+    const el = document.getElementById('contacts-result');
+    el.textContent = '同期中...';
+    try {
+      const r = await this.api('/api/admin/sendgrid/contacts-sync', { method: 'POST' });
+      el.style.color = '#10b981';
+      el.textContent = `✅ ${r.synced.toLocaleString()} 件同期完了`;
+      if (r.errors?.length) el.textContent += ` (エラー: ${r.errors.join(', ')})`;
+      this.showToast(`${r.synced.toLocaleString()} 件をSendGridに同期しました`);
+    } catch (e) { el.style.color = '#f87171'; el.textContent = '❌ ' + e.message; }
+  },
+
+  async requestVerifiedSender() {
+    const el = document.getElementById('sender-req-result');
+    const from_email = document.getElementById('vs-email').value.trim();
+    const from_name  = document.getElementById('vs-name').value.trim();
+    if (!from_email || !from_name) { el.style.color = '#f87171'; el.textContent = 'メールアドレスと表示名を入力してください'; return; }
+    el.textContent = '申請中...';
+    try {
+      const r = await this.api('/api/admin/sendgrid/sender-request', {
+        method: 'POST', body: JSON.stringify({ from_email, from_name }),
+      });
+      el.style.color = '#10b981';
+      el.textContent = `✅ ${r.note}`;
+      this.showToast('確認メールを送信しました');
+    } catch (e) { el.style.color = '#f87171'; el.textContent = '❌ ' + e.message; }
+  },
+
   saveApiBase() {
     const v = document.getElementById('set-api').value.trim().replace(/\/$/, '');
     localStorage.setItem('fp_admin_api', v);
