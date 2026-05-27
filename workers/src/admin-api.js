@@ -16,7 +16,9 @@
  * - /api/admin/stats/events         GET イベント時系列
  */
 import { json, text, csvField, toCsv, match } from './utils.js';
-import { sendBatchMail, setupEventWebhook, getEventWebhookSettings, syncContactsBulk, requestVerifiedSender, listVerifiedSenders } from './sendgrid.js';
+import { sendBatchMail, sendMail, setupEventWebhook, getEventWebhookSettings, syncContactsBulk, requestVerifiedSender, listVerifiedSenders } from './sendgrid.js';
+import { handleNewsletterRequest } from './newsletter-api.js';
+import { handleScenarioRequest } from './scenario-api.js';
 
 export async function handleAdminRequest(request, env, corsHeaders) {
   const url = new URL(request.url);
@@ -70,6 +72,17 @@ export async function handleAdminRequest(request, env, corsHeaders) {
   if (path === '/api/admin/sender-settings' && method === 'GET')  return listSenderSettings(env, corsHeaders);
   if (path === '/api/admin/sender-settings' && method === 'POST') return createSenderSetting(request, env, corsHeaders);
   if (path === '/api/admin/sender-settings/sync' && method === 'POST') return syncSendersFromSendGrid(env, corsHeaders);
+
+  // ---- Newsletters ----
+  const nlResult = await handleNewsletterRequest(request, env, path, method, corsHeaders);
+  if (nlResult) return nlResult;
+
+  // ---- Scenario Flows ----
+  const scResult = await handleScenarioRequest(request, env, path, method, corsHeaders);
+  if (scResult) return scResult;
+
+  // ---- Test Send ----
+  if (path === '/api/admin/campaigns/test' && method === 'POST') return testSend(request, env, corsHeaders);
 
   // ---- SendGrid Setup ----
   if (path === '/api/admin/sendgrid/webhook-setup'   && method === 'POST') return setupSendGridWebhook(env, corsHeaders);
@@ -599,6 +612,42 @@ async function statsEvents(env, q, ch) {
 //  SendGrid セットアップ
 // ====================================================================
 
+async function testSend(request, env, ch) {
+  const b = await request.json().catch(() => ({}));
+  const { to, subject, body_html, body_text = '', from_sender_id } = b;
+  if (!to || !subject || !body_html) return json({ ok: false, error: 'to/subject/body_html required' }, 400, ch);
+
+  let fromEmail, fromName;
+  if (from_sender_id) {
+    const s = await env.DB.prepare('SELECT from_email, from_name FROM sender_settings WHERE id=?').bind(from_sender_id).first();
+    if (s) { fromEmail = s.from_email; fromName = s.from_name; }
+  }
+  if (!fromEmail) {
+    const def = await env.DB.prepare('SELECT from_email, from_name FROM sender_settings WHERE is_default=1').first();
+    if (def) { fromEmail = def.from_email; fromName = def.from_name; }
+  }
+
+  const previewHtml = body_html
+    .replaceAll('{{name}}', 'テストユーザー')
+    .replaceAll('{{email}}', to)
+    .replaceAll('{{role}}', 'テスト');
+
+  try {
+    await sendMail(env, {
+      to,
+      subject: `[テスト] ${subject}`,
+      html: previewHtml,
+      text: body_text,
+      categories: ['test'],
+      customArgs: {},
+      ...(fromEmail ? {} : {}),
+    });
+    return json({ ok: true }, 200, ch);
+  } catch (e) {
+    return json({ ok: false, error: e.message }, 500, ch);
+  }
+}
+
 async function setupSendGridWebhook(env, ch) {
   const webhookUrl = `${env.API_BASE}/api/sendgrid/webhook`;
   try {
@@ -629,7 +678,13 @@ async function createVerifiedSenderRequest(request, env, ch) {
     return json({ ok: false, error: 'from_email と from_name は必須' }, 400, ch);
   }
   try {
-    const r = await requestVerifiedSender(env, body);
+    const r = await requestVerifiedSender(env, {
+      fromEmail: body.from_email,
+      fromName:  body.from_name,
+      address:   body.address,
+      city:      body.city,
+      country:   body.country,
+    });
     // DBにも仮登録 (status: pending)
     await env.DB.prepare(
       `INSERT OR IGNORE INTO sender_settings (from_email, from_name, status, created_at, updated_at)

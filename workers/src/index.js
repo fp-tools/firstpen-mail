@@ -12,8 +12,13 @@ import { json, buildCorsHeaders, requireBasicAuth } from './utils.js';
 import { handleWaitlistSubmit, handleEventWebhook } from './public-api.js';
 import { handleAdminRequest } from './admin-api.js';
 import { widgetScript } from './widget.js';
+import { runScenarioEngine } from './scenario-engine.js';
 
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScenarioEngine(env));
+  },
+
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;

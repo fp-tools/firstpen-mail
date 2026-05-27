@@ -141,6 +141,8 @@ const App = {
     'subscribers': { title: '登録者一覧',         fn: 'renderSubscribers' },
     'tags':        { title: 'タグ・セグメント',   fn: 'renderTags' },
     'templates':   { title: 'テンプレート',       fn: 'renderTemplates' },
+    'newsletters':      { title: 'メールマガジン',     fn: 'renderNewsletters' },
+    'scenario-flows':   { title: 'シナリオフロー',   fn: 'renderScenarioFlows' },
     'campaigns':        { title: '手動メール送信',   fn: 'renderCampaigns' },
     'step-flows':       { title: 'ステップメール',   fn: 'renderStepFlows' },
     'sender-settings':  { title: '送信者設定',       fn: 'renderSenderSettings' },
@@ -177,10 +179,11 @@ const App = {
     this._tt = setTimeout(() => this.toast.classList.remove('show'), 2400);
   },
 
-  openModal(title, html) {
+  openModal(title, html, wide = false) {
     this.modalTitle.textContent = title;
     this.modalBody.innerHTML = html;
     this.modal.classList.remove('hidden');
+    this.modal.querySelector('.modal-panel').style.maxWidth = wide ? '860px' : '';
   },
   closeModal() { this.modal.classList.add('hidden'); this.modalBody.innerHTML = ''; },
 
@@ -604,7 +607,10 @@ const App = {
           </select>
         </div>
       </div>
-      <label>HTML本文 * (使用可能変数: <code>{{name}}</code> <code>{{email}}</code> <code>{{role}}</code>)</label>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">
+        <label style="margin:0">HTML本文 * (変数: <code>{{name}}</code> <code>{{email}}</code> <code>{{role}}</code>)</label>
+        <button class="btn btn-sm" onclick="App.openGrapesEditor('t-html')">🎨 ビジュアルエディタ</button>
+      </div>
       <div class="editor-grid">
         <div><textarea class="textarea" id="t-html" style="min-height:340px">${this.escape(t.body_html)}</textarea></div>
         <div><label class="muted">プレビュー</label><iframe id="t-preview"></iframe></div>
@@ -689,7 +695,10 @@ const App = {
           <span class="dim">または直接以下に入力</span>
         </div>
 
-        <label>HTML本文 * (変数: <code>{{name}}</code> <code>{{email}}</code> <code>{{role}}</code>)</label>
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">
+          <label style="margin:0">HTML本文 * (変数: <code>{{name}}</code> <code>{{email}}</code> <code>{{role}}</code>)</label>
+          <button class="btn btn-sm" onclick="App.openGrapesEditor('c-html')">🎨 ビジュアルエディタ</button>
+        </div>
         <div class="editor-grid">
           <div><textarea class="textarea" id="c-html" style="min-height:320px"></textarea></div>
           <div><label class="muted">プレビュー</label><iframe id="c-preview"></iframe></div>
@@ -722,7 +731,8 @@ const App = {
         <hr class="hr">
         <div class="row" style="justify-content:flex-end">
           <button class="btn" onclick="App.previewRecipients()">📋 配信対象を確認</button>
-          <button class="btn btn-primary" onclick="App.sendCampaign()">📨 送信実行</button>
+          <button class="btn" onclick="App.openTestSend()">🧪 テスト送信</button>
+          <button class="btn btn-primary" onclick="App.openSendConfirm()">📨 送信実行</button>
         </div>
       </div>
 
@@ -969,6 +979,444 @@ const App = {
     if (!confirm('フローを削除しますか?')) return;
     await this.api(`/api/admin/step-flows/${id}`, { method: 'DELETE' });
     this.showToast('削除しました'); this.closeModal(); this.renderStepFlows();
+  },
+
+  // ============================================================
+  //  テスト送信 / 確認画面
+  // ============================================================
+  openTestSend() {
+    const subject  = document.getElementById('c-subject')?.value || '';
+    const bodyHtml = document.getElementById('c-html')?.value || '';
+    if (!subject || !bodyHtml) return this.showToast('件名とHTML本文を先に入力してください', 'ng');
+    this.openModal('🧪 テスト送信', `
+      <p class="muted" style="font-size:12px;margin-bottom:12px">
+        件名の前に [テスト] が付き、変数は仮データに置換されて送信されます。
+      </p>
+      <div class="form-row">
+        <div><label>送信先メールアドレス *</label>
+          <input class="input" id="test-to" type="email" placeholder="test@example.com" value="${this.escape(localStorage.getItem('fp_test_to') || '')}">
+        </div>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px">
+        <button class="btn" onclick="App.closeModal()">キャンセル</button>
+        <button class="btn btn-primary" onclick="App.doTestSend()">送信</button>
+      </div>
+    `);
+  },
+
+  async doTestSend() {
+    const to = document.getElementById('test-to')?.value.trim();
+    if (!to) return this.showToast('送信先を入力してください', 'ng');
+    localStorage.setItem('fp_test_to', to);
+    const senderId = parseInt(document.getElementById('c-sender')?.value, 10) || null;
+    const body = {
+      to,
+      subject: document.getElementById('c-subject').value,
+      body_html: document.getElementById('c-html').value,
+      body_text: document.getElementById('c-text')?.value || '',
+      ...(senderId ? { from_sender_id: senderId } : {}),
+    };
+    this.showToast('テスト送信中...');
+    try {
+      await this.api('/api/admin/campaigns/test', { method: 'POST', body: JSON.stringify(body) });
+      this.showToast(`✅ ${to} へテスト送信しました`);
+      this.closeModal();
+    } catch (e) { this.showToast('送信失敗: ' + e.message, 'ng'); }
+  },
+
+  async openSendConfirm() {
+    const subject  = document.getElementById('c-subject')?.value.trim();
+    const bodyHtml = document.getElementById('c-html')?.value;
+    if (!subject || !bodyHtml) return this.showToast('件名とHTML本文は必須', 'ng');
+    const target   = this.buildTarget();
+    const senderId = parseInt(document.getElementById('c-sender')?.value, 10) || null;
+    const senderText = document.getElementById('c-sender')?.options[document.getElementById('c-sender').selectedIndex]?.text || 'デフォルト';
+    const tagId  = target.tag_ids?.[0] || '';
+    const role   = target.roles?.[0]   || '';
+    const r = await this.api(`/api/admin/subscribers?per_page=1&status=active&role=${role}&tag=${tagId}`);
+    const count = r.total || 0;
+    this.openModal('📨 送信確認', `
+      <div class="grid grid-2" style="margin-bottom:16px">
+        <div class="card" style="padding:14px"><div class="card-title">件名</div><div>${this.escape(subject)}</div></div>
+        <div class="card" style="padding:14px"><div class="card-title">From</div><div class="muted">${this.escape(senderText)}</div></div>
+        <div class="card" style="padding:14px"><div class="card-title">配信対象</div><div style="font-size:22px;font-weight:700;color:#7c3aed">${count.toLocaleString()} 名</div></div>
+        <div class="card" style="padding:14px"><div class="card-title">プレビュー</div><div class="muted" style="font-size:11px">${this.escape(bodyHtml.replace(/<[^>]+>/g,'').slice(0,80))}...</div></div>
+      </div>
+      ${count === 0 ? '<p style="color:#f87171;font-size:12px">⚠️ 配信対象が0件です。絞り込み条件を確認してください。</p>' : ''}
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn" onclick="App.closeModal()">キャンセル</button>
+        <button class="btn btn-primary" ${count===0?'disabled':''} onclick="App.closeModal();App.sendCampaign();">この内容で送信する</button>
+      </div>
+    `);
+  },
+
+  // ============================================================
+  //  GrapesJS ビジュアルエディタ
+  // ============================================================
+  openGrapesEditor(targetId, callback) {
+    if (typeof grapesjs === 'undefined') {
+      return this.showToast('エディタの読み込み中です。しばらくお待ちください', 'ng');
+    }
+    const existing = document.getElementById(targetId)?.value || '';
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;display:flex;flex-direction:column;background:#fff';
+    const bar = document.createElement('div');
+    bar.style.cssText = 'height:52px;background:#1e1e2e;display:flex;align-items:center;padding:0 20px;gap:12px;flex-shrink:0';
+    bar.innerHTML = `
+      <span style="color:#fff;font-weight:600;font-size:15px">🎨 ビジュアルエディタ</span>
+      <div style="flex:1"></div>
+      <button id="gjs-cancel-btn" style="padding:8px 18px;background:#4b5563;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">キャンセル</button>
+      <button id="gjs-save-btn" style="padding:8px 18px;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600">✓ 保存してHTMLに反映</button>
+    `;
+    const wrap = document.createElement('div');
+    wrap.id = 'gjs-wrap';
+    wrap.style.cssText = 'flex:1;overflow:hidden';
+    overlay.appendChild(bar);
+    overlay.appendChild(wrap);
+    document.body.appendChild(overlay);
+
+    const editor = grapesjs.init({
+      container: '#gjs-wrap',
+      height: '100%',
+      width: '100%',
+      plugins: ['grapesjs-preset-newsletter'],
+      pluginsOpts: { 'grapesjs-preset-newsletter': { inlineCss: true } },
+      storageManager: false,
+      components: existing || '<p>ここにコンテンツを追加してください</p>',
+      style: '',
+    });
+
+    document.getElementById('gjs-save-btn').addEventListener('click', () => {
+      const html = editor.runCommand('gjs-get-inlined-html') || `<style>${editor.getCss()}</style>${editor.getHtml()}`;
+      const el = document.getElementById(targetId);
+      if (el) {
+        el.value = html;
+        el.dispatchEvent(new Event('input'));
+      }
+      if (typeof callback === 'function') callback(html);
+      editor.destroy();
+      overlay.remove();
+    });
+    document.getElementById('gjs-cancel-btn').addEventListener('click', () => {
+      editor.destroy();
+      overlay.remove();
+    });
+  },
+
+  // ============================================================
+  //  画面: メールマガジン
+  // ============================================================
+  async renderNewsletters() {
+    const [{ items }, { items: senders }] = await Promise.all([
+      this.api('/api/admin/newsletters'),
+      this.api('/api/admin/sender-settings'),
+    ]);
+    this.view.innerHTML = `
+      <div class="row" style="justify-content:space-between;margin-bottom:14px">
+        <h2 class="section-title" style="margin:0">メールマガジン</h2>
+        <button class="btn btn-primary" onclick="App.editNewsletter(null, ${JSON.stringify(JSON.stringify(senders)).slice(1,-1)})">+ 新規作成</button>
+      </div>
+      <p class="section-sub">メールマガジンごとに購読者を管理し、シナリオフローを紐付けられます。</p>
+      <div class="grid grid-2">
+        ${items.length ? items.map(n => `
+          <div class="card">
+            <div class="row" style="justify-content:space-between;align-items:flex-start">
+              <div>
+                <strong style="font-size:15px">${this.escape(n.name)}</strong>
+                <div class="muted" style="font-size:12px;margin-top:2px">slug: <code>${this.escape(n.slug)}</code></div>
+                <div class="muted" style="font-size:12px;margin-top:2px">${this.escape(n.description) || '<span class="dim">説明なし</span>'}</div>
+              </div>
+              <span class="badge badge-${n.status === 'active' ? 'active' : 'unsub'}">${n.status}</span>
+            </div>
+            <hr class="hr">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <div class="muted" style="font-size:12px">👥 ${n.subscriber_count} 名購読中</div>
+              <div class="row">
+                <button class="btn btn-sm" onclick="App.viewNewsletter(${n.id})">詳細</button>
+                <button class="btn btn-sm" onclick="App.editNewsletter(${n.id})">編集</button>
+              </div>
+            </div>
+          </div>
+        `).join('') : '<div class="empty">メールマガジンがありません</div>'}
+      </div>
+    `;
+  },
+
+  async viewNewsletter(id) {
+    const { item } = await this.api(`/api/admin/newsletters/${id}`);
+    const { items: subs } = await this.api(`/api/admin/newsletters/${id}/subscriptions`);
+    const { items: allSubs } = await this.api('/api/admin/subscribers?per_page=200&status=active');
+    const subIds = new Set(subs.map(s => s.subscriber_id));
+    const unsubscribed = allSubs.filter(s => !subIds.has(s.id));
+    this.openModal(`📰 ${this.escape(item.name)}`, `
+      <div class="row" style="justify-content:space-between;margin-bottom:14px">
+        <div><strong>購読者: ${subs.filter(s=>s.status==='active').length} 名</strong></div>
+        <div class="row">
+          <select class="select" id="nl-add-sub" style="min-width:200px">
+            <option value="">-- 購読者を追加 --</option>
+            ${unsubscribed.map(s => `<option value="${s.id}">${this.escape(s.email)}</option>`).join('')}
+          </select>
+          <button class="btn btn-sm btn-primary" onclick="App.addNlSubscriber(${id})">追加</button>
+        </div>
+      </div>
+      <div style="max-height:300px;overflow-y:auto">
+        <table>
+          <thead><tr><th>メール</th><th>名前</th><th>状態</th><th>登録日</th><th></th></tr></thead>
+          <tbody>
+            ${subs.length ? subs.map(s => `
+              <tr>
+                <td>${this.escape(s.email)}</td>
+                <td>${this.escape(s.name) || '-'}</td>
+                <td><span class="badge badge-${s.status==='active'?'active':'unsub'}">${s.status}</span></td>
+                <td class="muted">${this.fmtDate(s.opted_in_at)}</td>
+                <td><button class="btn btn-sm" onclick="App.removeNlSubscriber(${id},${s.subscriber_id})">削除</button></td>
+              </tr>
+            `).join('') : '<tr><td colspan="5"><div class="empty">購読者なし</div></td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      ${item.flows?.length ? `<hr class="hr"><label>紐付きシナリオ</label><div>${item.flows.map(f=>`<span class="badge badge-draft" style="margin-right:6px">${this.escape(f.name)}</span>`).join('')}</div>` : ''}
+    `);
+  },
+
+  async addNlSubscriber(nlId) {
+    const sid = document.getElementById('nl-add-sub')?.value;
+    if (!sid) return;
+    await this.api(`/api/admin/newsletters/${nlId}/subscribe`, { method: 'POST', body: JSON.stringify({ subscriber_ids: [parseInt(sid)] }) });
+    this.showToast('追加しました');
+    this.viewNewsletter(nlId);
+  },
+
+  async removeNlSubscriber(nlId, sid) {
+    await this.api(`/api/admin/newsletters/${nlId}/unsubscribe`, { method: 'POST', body: JSON.stringify({ subscriber_ids: [sid] }) });
+    this.showToast('削除しました');
+    this.viewNewsletter(nlId);
+  },
+
+  async editNewsletter(id) {
+    const { items: senders } = await this.api('/api/admin/sender-settings');
+    let n = { name: '', description: '', slug: '', status: 'active', from_sender_id: null, reply_to: '' };
+    if (id) { const r = await this.api(`/api/admin/newsletters/${id}`); n = r.item; }
+    this.openModal(id ? `マガジン編集 #${id}` : '新規マガジン', `
+      <div class="form-row">
+        <div><label>名前 *</label><input class="input" id="nl-name" value="${this.escape(n.name)}"></div>
+        <div><label>スラッグ * (URL用・英数字)</label><input class="input" id="nl-slug" value="${this.escape(n.slug)}" ${id?'readonly':''}></div>
+        <div><label>説明</label><input class="input" id="nl-desc" value="${this.escape(n.description)}"></div>
+        <div><label>送信元</label>
+          <select class="select" id="nl-sender">
+            <option value="">デフォルト</option>
+            ${senders.map(s=>`<option value="${s.id}" ${n.from_sender_id==s.id?'selected':''}>${this.escape(s.from_name)} &lt;${this.escape(s.from_email)}&gt;</option>`).join('')}
+          </select>
+        </div>
+        <div><label>ステータス</label>
+          <select class="select" id="nl-status">
+            <option value="active" ${n.status==='active'?'selected':''}>active</option>
+            <option value="paused" ${n.status==='paused'?'selected':''}>paused</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:14px">
+        <button class="btn" onclick="App.closeModal()">キャンセル</button>
+        <button class="btn btn-primary" onclick="App.saveNewsletter(${id||0})">保存</button>
+      </div>
+    `);
+  },
+
+  async saveNewsletter(id) {
+    const b = {
+      name: document.getElementById('nl-name').value.trim(),
+      slug: document.getElementById('nl-slug').value.trim(),
+      description: document.getElementById('nl-desc').value.trim(),
+      from_sender_id: parseInt(document.getElementById('nl-sender').value)||null,
+      status: document.getElementById('nl-status').value,
+    };
+    if (!b.name || !b.slug) return this.showToast('名前とスラッグは必須', 'ng');
+    try {
+      if (id) await this.api(`/api/admin/newsletters/${id}`, { method: 'PUT', body: JSON.stringify(b) });
+      else    await this.api('/api/admin/newsletters',       { method: 'POST', body: JSON.stringify(b) });
+      this.showToast('保存しました'); this.closeModal(); this.renderNewsletters();
+    } catch (e) { this.showToast(e.message, 'ng'); }
+  },
+
+  // ============================================================
+  //  画面: シナリオフロー
+  // ============================================================
+  async renderScenarioFlows() {
+    const [{ items }, { items: newsletters }] = await Promise.all([
+      this.api('/api/admin/scenario-flows'),
+      this.api('/api/admin/newsletters'),
+    ]);
+    this.view.innerHTML = `
+      <div class="row" style="justify-content:space-between;margin-bottom:14px">
+        <h2 class="section-title" style="margin:0">シナリオフロー</h2>
+        <button class="btn btn-primary" onclick="App.editScenario()">+ 新規フロー</button>
+      </div>
+      <p class="section-sub">購読・開封・クリックをトリガーに自動メール配信。条件分岐で異なるシナリオを実行できます。</p>
+      <div class="grid grid-2">
+        ${items.length ? items.map(f => `
+          <div class="card">
+            <div class="row" style="justify-content:space-between;align-items:flex-start">
+              <div>
+                <strong>${this.escape(f.name)}</strong>
+                <div class="muted" style="font-size:12px;margin-top:4px">
+                  トリガー: <code>${f.trigger_type}</code>
+                  ${f.newsletter_name ? ` / ${this.escape(f.newsletter_name)}` : ''}
+                </div>
+              </div>
+              <span class="badge badge-${f.status==='active'?'active':'unsub'}">${f.status}</span>
+            </div>
+            <hr class="hr">
+            <div class="row" style="justify-content:space-between;font-size:12px;align-items:center">
+              <div class="muted">ステップ: ${f.step_count}件 / 実行中: ${f.active_count}件</div>
+              <div class="row">
+                <button class="btn btn-sm" onclick="App.startScenario(${f.id})">▶ 開始</button>
+                <button class="btn btn-sm" onclick="App.editScenario(${f.id})">編集</button>
+              </div>
+            </div>
+          </div>
+        `).join('') : '<div class="empty">シナリオフローがありません</div>'}
+      </div>
+    `;
+    this._nlList = newsletters;
+  },
+
+  async editScenario(id) {
+    const nlList = this._nlList || (await this.api('/api/admin/newsletters')).items;
+    let f = { name: '', description: '', trigger_type: 'on_subscribe', newsletter_id: null, status: 'active', steps: [] };
+    if (id) { const r = await this.api(`/api/admin/scenario-flows/${id}`); f = r.item; }
+    this.openModal(id ? `シナリオ編集 #${id}` : '新規シナリオ', `
+      <div class="form-row">
+        <div><label>フロー名 *</label><input class="input" id="sc-name" value="${this.escape(f.name)}"></div>
+        <div><label>説明</label><input class="input" id="sc-desc" value="${this.escape(f.description||'')}"></div>
+        <div><label>トリガー</label>
+          <select class="select" id="sc-trigger">
+            <option value="on_subscribe" ${f.trigger_type==='on_subscribe'?'selected':''}>購読時 (on_subscribe)</option>
+            <option value="manual"       ${f.trigger_type==='manual'?'selected':''}>手動起動</option>
+          </select>
+        </div>
+        <div><label>対象マガジン</label>
+          <select class="select" id="sc-nl">
+            <option value="">未設定</option>
+            ${nlList.map(n=>`<option value="${n.id}" ${f.newsletter_id==n.id?'selected':''}>${this.escape(n.name)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <hr class="hr">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+        <label style="margin:0">ステップ</label>
+        <div class="row">
+          <button class="btn btn-sm" onclick="App.addScStep('email')">+ メール</button>
+          <button class="btn btn-sm" onclick="App.addScStep('condition')">+ 条件分岐</button>
+          <button class="btn btn-sm" onclick="App.addScStep('wait')">+ 待機</button>
+        </div>
+      </div>
+      <div id="sc-steps">
+        ${(f.steps||[]).map((s,i)=>this.scStepRow(s,i)).join('')}
+      </div>
+      <div class="row" style="justify-content:space-between;margin-top:14px">
+        ${id ? `<button class="btn btn-danger btn-sm" onclick="App.deleteScenario(${id})">削除</button>` : '<span></span>'}
+        <div class="row">
+          <button class="btn" onclick="App.closeModal()">キャンセル</button>
+          <button class="btn btn-primary" onclick="App.saveScenario(${id||0})">保存</button>
+        </div>
+      </div>
+    `, true);
+  },
+
+  scStepRow(s = {}, i = 0) {
+    const type = s.step_type || 'email';
+    const typeLabel = { email: '📧 メール', condition: '🔀 条件分岐', wait: '⏱ 待機' }[type] || type;
+    return `<div class="card sc-step-row" style="padding:12px;margin-bottom:8px" data-type="${type}">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <strong style="font-size:13px">Step ${i+1}: ${typeLabel}</strong>
+        <div class="row">
+          <span class="muted" style="font-size:11px">order: <input type="number" class="input sc-order" style="width:60px;padding:2px 6px;font-size:11px" value="${s.step_order ?? i}"></span>
+          <button class="btn-icon" onclick="this.closest('.sc-step-row').remove()">✕</button>
+        </div>
+      </div>
+      <input type="hidden" class="sc-type" value="${type}">
+      <div class="form-row" style="grid-template-columns:120px 1fr;gap:8px">
+        <div><label style="font-size:11px">遅延(h)</label><input class="input sc-delay" type="number" value="${s.delay_hours||0}" style="font-size:12px"></div>
+        ${type === 'email' ? `
+          <div><label style="font-size:11px">件名 *</label><input class="input sc-subject" value="${this.escape(s.subject||'')}" style="font-size:12px"></div>
+        ` : type === 'condition' ? `
+          <div><label style="font-size:11px">条件</label>
+            <select class="select sc-condition-type" style="font-size:12px">
+              <option value="opened" ${s.condition_type==='opened'?'selected':''}>開封した</option>
+              <option value="clicked" ${s.condition_type==='clicked'?'selected':''}>クリックした</option>
+              <option value="not_opened" ${s.condition_type==='not_opened'?'selected':''}>開封しなかった</option>
+              <option value="not_clicked" ${s.condition_type==='not_clicked'?'selected':''}>クリックしなかった</option>
+            </select>
+          </div>
+        ` : '<div></div>'}
+      </div>
+      ${type === 'email' ? `
+        <div class="row" style="justify-content:space-between;align-items:center;margin:4px 0">
+          <label style="font-size:11px;margin:0">HTML本文 *</label>
+          <button class="btn btn-sm" style="font-size:11px" onclick="App.openGrapesEditor(null, html => this.closest('.sc-step-row').querySelector('.sc-html').value = html)">🎨 エディタ</button>
+        </div>
+        <textarea class="textarea sc-html" style="min-height:100px;font-size:12px">${this.escape(s.body_html||'')}</textarea>
+      ` : type === 'condition' ? `
+        <div class="form-row" style="grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+          <div><label style="font-size:11px">TRUE → Step order</label><input class="input sc-yes" type="number" value="${s.yes_next_order??''}" style="font-size:12px" placeholder="次のorder番号"></div>
+          <div><label style="font-size:11px">FALSE → Step order</label><input class="input sc-no" type="number" value="${s.no_next_order??''}" style="font-size:12px" placeholder="次のorder番号"></div>
+        </div>
+        <div style="margin-top:4px"><label style="font-size:11px">判定対象のStep order</label><input class="input sc-cond-step" type="number" value="${s.condition_step_order??''}" style="font-size:12px" placeholder="判定するステップのorder"></div>
+      ` : ''}
+    </div>`;
+  },
+
+  addScStep(type) {
+    const list = document.getElementById('sc-steps');
+    const idx = list.children.length;
+    list.insertAdjacentHTML('beforeend', this.scStepRow({ step_type: type }, idx));
+  },
+
+  collectScSteps() {
+    return Array.from(document.querySelectorAll('.sc-step-row')).map(row => ({
+      step_type: row.querySelector('.sc-type')?.value || 'email',
+      step_order: parseInt(row.querySelector('.sc-order')?.value, 10) || 0,
+      delay_hours: parseInt(row.querySelector('.sc-delay')?.value, 10) || 0,
+      subject: row.querySelector('.sc-subject')?.value.trim() || '',
+      body_html: row.querySelector('.sc-html')?.value || '',
+      body_text: '',
+      condition_type: row.querySelector('.sc-condition-type')?.value || '',
+      condition_step_order: parseInt(row.querySelector('.sc-cond-step')?.value, 10) || null,
+      yes_next_order: parseInt(row.querySelector('.sc-yes')?.value, 10) || null,
+      no_next_order: parseInt(row.querySelector('.sc-no')?.value, 10) || null,
+    }));
+  },
+
+  async saveScenario(id) {
+    const body = {
+      name: document.getElementById('sc-name').value.trim(),
+      description: document.getElementById('sc-desc').value.trim(),
+      trigger_type: document.getElementById('sc-trigger').value,
+      newsletter_id: parseInt(document.getElementById('sc-nl').value)||null,
+      status: 'active',
+      steps: this.collectScSteps(),
+    };
+    if (!body.name) return this.showToast('フロー名必須', 'ng');
+    try {
+      if (id) await this.api(`/api/admin/scenario-flows/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+      else    await this.api('/api/admin/scenario-flows',       { method: 'POST', body: JSON.stringify(body) });
+      this.showToast('保存しました'); this.closeModal(); this.renderScenarioFlows();
+    } catch (e) { this.showToast(e.message, 'ng'); }
+  },
+
+  async deleteScenario(id) {
+    if (!confirm('フローを削除しますか?')) return;
+    await this.api(`/api/admin/scenario-flows/${id}`, { method: 'DELETE' });
+    this.showToast('削除しました'); this.closeModal(); this.renderScenarioFlows();
+  },
+
+  async startScenario(flowId) {
+    const nlId = prompt('対象マガジンID（空の場合は全購読者を手動入力）:');
+    const body = nlId ? { newsletter_id: parseInt(nlId) } : {};
+    try {
+      const r = await this.api(`/api/admin/scenario-flows/${flowId}/start`, { method: 'POST', body: JSON.stringify(body) });
+      this.showToast(`${r.started} 件のワークフローを開始しました`);
+    } catch (e) { this.showToast(e.message, 'ng'); }
   },
 
   // ============================================================

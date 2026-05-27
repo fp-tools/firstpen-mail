@@ -26,5 +26,8 @@ API_BASE = "https://firstpen-waitlist-api.soga-naoya.workers.dev"
 # --------------------------------------------
 #  ログ
 # --------------------------------------------
+[triggers]
+crons = ["*/5 * * * *"]
+
 [observability]
 enabled = true
